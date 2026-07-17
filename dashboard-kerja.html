@@ -3734,6 +3734,27 @@
         function fmtRp(n) { n = Math.round(parseNumber(n) || 0); return 'Rp ' + n.toLocaleString('id-ID'); }
         function fmtNumOnly(n) { n = Math.round(parseNumber(n) || 0); return n ? n.toLocaleString('id-ID') : ''; }
 
+        // Normalisasi No.Faktur untuk pencocokan antar tab (Bank Data Penjualan <-> Data Uang Masuk).
+        // Kenapa perlu: kadang satu sisi No.Faktur ke-import sebagai TEKS (nol di depan tetap ada)
+        // sementara sisi lain ke-import sebagai ANGKA (nol di depan hilang). Dibandingkan dengan
+        // "===" string biasa, dua No.Faktur yg sebenarnya sama jadi dianggap beda -> status
+        // "Lunas"/pencocokan Data Uang Masuk gagal padahal datanya ada.
+        function normFaktur(v) {
+            return String(v || '').trim().toLowerCase().replace(/[\s\-.]/g, '').replace(/^0+(?=\d)/, '');
+        }
+
+        // Normalisasi kode tanggal harian "D-M" / "DD-MM" (dipakai di dalam data Data Uang Masuk)
+        // jadi selalu "DD-MM" dengan nol di depan. Kenapa perlu: sebagian data lama tersimpan
+        // tanpa nol di depan (mis. "5-7"), sementara kode lain selalu membaca/menulis dengan nol
+        // di depan (mis. "05-07") -> perbandingan "===" gagal utk tanggal2 tsb & tombol Muat
+        // jadi terlihat "tidak berfungsi" (padahal cuma gagal ketemu, bukan error).
+        function normDDMM(v) {
+            const s = String(v || '').trim();
+            const m = s.match(/^(\d{1,2})-(\d{1,2})$/);
+            if (!m) return s.toLowerCase();
+            return m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+        }
+
         function parseNumber(v) {
             if (v === null || v === undefined || v === '') return 0;
             if (typeof v === 'number') return v;
@@ -4615,11 +4636,11 @@
                             ' hari baru?')) {
                             cashDataMap[cashBulan] = results;
                         } else {
-                            const existing = new Set(current.map(d => d.tanggal));
+                            const existing = new Set(current.map(d => normDDMM(d.tanggal)));
                             results.forEach(newItem => {
-                                if (!existing.has(newItem.tanggal)) current.push(newItem);
+                                if (!existing.has(normDDMM(newItem.tanggal))) current.push(newItem);
                                 else {
-                                    const idx = current.findIndex(d => d.tanggal === newItem.tanggal);
+                                    const idx = current.findIndex(d => normDDMM(d.tanggal) === normDDMM(newItem.tanggal));
                                     if (idx !== -1) current[idx] = newItem;
                                 }
                             });
@@ -5989,19 +6010,16 @@
             });
             const filteredCashDrop = getFilteredCashDetail(cashDroppingAll);
             const cashDropMap = new Map();
-            filteredCashDrop.forEach(d => { const no = (d.noFaktur || '').toString().trim(); if (no) cashDropMap.set(no,
-                    d); });
+            filteredCashDrop.forEach(d => { const no = normFaktur(d.noFaktur); if (no) cashDropMap.set(no, d); });
 
             let filteredCashSales = cashSales;
             let filteredCashDropFinal = filteredCashDrop;
             if (cekFilterKet === 'cocok') {
-                filteredCashSales = cashSales.filter(d => cashDropMap.has((d['No.Faktur'] || '').toString().trim()));
-                filteredCashDropFinal = filteredCashDrop.filter(d => cashDropMap.has((d.noFaktur || '').toString()
-                .trim()));
+                filteredCashSales = cashSales.filter(d => cashDropMap.has(normFaktur(d['No.Faktur'])));
+                filteredCashDropFinal = filteredCashDrop.filter(d => cashDropMap.has(normFaktur(d.noFaktur)));
             } else if (cekFilterKet === 'tidak') {
-                filteredCashSales = cashSales.filter(d => !cashDropMap.has((d['No.Faktur'] || '').toString().trim()));
-                filteredCashDropFinal = filteredCashDrop.filter(d => !cashDropMap.has((d.noFaktur || '').toString()
-                .trim()));
+                filteredCashSales = cashSales.filter(d => !cashDropMap.has(normFaktur(d['No.Faktur'])));
+                filteredCashDropFinal = filteredCashDrop.filter(d => !cashDropMap.has(normFaktur(d.noFaktur)));
             }
 
             rawCashSales = filteredCashSales;
@@ -6189,7 +6207,7 @@
 
         function ptLatestByFaktur(flatList) {
             const map = {};
-            flatList.forEach(d => { const key = String(d.noFaktur || '').trim().toLowerCase(); if (!key) return; if (!map[
+            flatList.forEach(d => { const key = normFaktur(d.noFaktur); if (!key) return; if (!map[
                     key] || (d._bulan >= map[key]._bulan)) map[key] = d; });
             return map;
         }
@@ -6215,7 +6233,7 @@
             today.setHours(0, 0, 0, 0);
             const rows = [];
             salesData.filter(r => r.Pembayaran === 'Tempo').forEach(r => {
-                const key = String(r['No.Faktur'] || '').trim().toLowerCase();
+                const key = normFaktur(r['No.Faktur']);
                 const detail = piutangMap[key];
                 let cls, jt = '',
                     ketRaw = '',
@@ -6433,8 +6451,7 @@
             // Cek ulang ke Bank Data Penjualan (Tab 1): satu No.Faktur bisa punya lebih dari
             // 1 baris/item produk. Kalau hanya dihitung dari 1 baris, Total Tagihan jadi lebih
             // kecil dari yang sebenarnya sehingga Sisa Tagihan bisa minus padahal belum tentu lunas.
-            const itemsFaktur = salesData.filter(s => String(s['No.Faktur'] || '').trim() === String(r
-                .noFaktur || '').trim());
+            const itemsFaktur = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(r.noFaktur));
             const isMultiItem = itemsFaktur.length > 1;
             const totalTagihanGabungan = isMultiItem ? itemsFaktur.reduce((sum, it) => sum + parseNumber(it
                 .Total), 0) : r.total;
@@ -6495,8 +6512,7 @@
             const trashBtn = document.getElementById('ptTrashBtn');
             if (trashBtn) {
                 trashBtn.addEventListener('click', async () => {
-                    const idx = salesData.findIndex(row => String(row['No.Faktur'] || '').trim() === String(r
-                        .noFaktur || '').trim());
+                    const idx = salesData.findIndex(row => normFaktur(row['No.Faktur']) === normFaktur(r.noFaktur));
                     if (idx === -1) {
                         showToast('⚠️ Data asli tidak ditemukan di Bank Data Penjualan (mungkin sudah dipindahkan/dihapus).',
                             'warning');
@@ -6553,7 +6569,7 @@
             cashCurrentDetailFaktur = noFaktur;
 
             // Semua baris produk untuk No.Faktur ini dari Tab 1 (Bank Data Penjualan)
-            const items = salesData.filter(s => (s['No.Faktur'] || '').toString().trim() === noFaktur);
+            const items = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(noFaktur));
             const sumber = items.length ? items : [d];
 
             let totalQty = 0,
@@ -6691,8 +6707,7 @@
         // ================================================================
         async function ubahCashJadiPiutang(noFaktur) {
             if (!noFaktur) return;
-            const target = String(noFaktur).trim();
-            const rows = salesData.filter(r => (r['No.Faktur'] || '').toString().trim() === target);
+            const rows = salesData.filter(r => normFaktur(r['No.Faktur']) === normFaktur(noFaktur));
             if (rows.length === 0) {
                 showToast('❌ Baris faktur tidak ditemukan di Bank Data Penjualan.', 'warning');
                 return;
@@ -7806,7 +7821,7 @@
                     list = rec ? (rec.data || []) : [];
                 } catch (e) { list = []; }
             }
-            const existingIdx = list.findIndex(it => it.tanggal === tanggalKey);
+            const existingIdx = list.findIndex(it => normDDMM(it.tanggal) === normDDMM(tanggalKey));
             if (existingIdx >= 0) list[existingIdx] = dayRecord; else list.push(dayRecord);
             cashDataMap[bulanKey] = list;
 
@@ -7870,7 +7885,7 @@
                 list = rec ? (rec.data || []) : [];
             } catch (e) { return null; }
 
-            const day = list.find(it => it.tanggal === tanggalKey);
+            const day = list.find(it => normDDMM(it.tanggal) === normDDMM(tanggalKey));
             if (!day) return null;
 
             const piutang = (day.piutangDetail || []).map(it => ({
@@ -8900,7 +8915,7 @@
             let sales = '',
                 tglFaktur = '';
             salesData.forEach(item => {
-                if (String(item['No.Faktur'] || '').trim() !== target) return;
+                if (normFaktur(item['No.Faktur']) !== normFaktur(target)) return;
                 const jml = parseNumber(item.Jumlah);
                 qty += jml;
                 if (item.Profit !== undefined && item.Profit !== '' && item.Profit !== null) {
@@ -9050,7 +9065,7 @@
             if (!noFaktur) return;
 
             const gidxList = [];
-            salesData.forEach((s, i) => { if (String(s['No.Faktur'] || '').trim() === noFaktur) gidxList.push(i); });
+            salesData.forEach((s, i) => { if (normFaktur(s['No.Faktur']) === normFaktur(noFaktur)) gidxList.push(i); });
             if (!gidxList.length) return;
             const rows = gidxList.map(i => salesData[i]);
 
@@ -9434,7 +9449,7 @@
 
         async function tab1BatalkanTransaksiFaktur(noFaktur) {
             const gidxList = [];
-            salesData.forEach((s, i) => { if (String(s['No.Faktur'] || '').trim() === noFaktur) gidxList.push(i); });
+            salesData.forEach((s, i) => { if (normFaktur(s['No.Faktur']) === normFaktur(noFaktur)) gidxList.push(i); });
             if (!gidxList.length) { showToast('Faktur tidak ditemukan.', 'warning'); return; }
             if (!confirm(`Batalkan transaksi faktur ${noFaktur}?\nSemua baris (${gidxList.length} item) akan dipindahkan ke Data Sampah dan bisa dipulihkan lagi dari tab Save Data All.`)) return;
 
@@ -9466,7 +9481,7 @@
             const noFaktur = String(item.noFaktur || '').trim();
             if (!noFaktur) return;
 
-            const rows = salesData.filter(s => String(s['No.Faktur'] || '').trim() === noFaktur);
+            const rows = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(noFaktur));
 
             let totalQty = 0,
                 totalJual = 0,
