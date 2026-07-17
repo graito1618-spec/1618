@@ -98,6 +98,47 @@
             z-index: 39 !important;
         }
 
+        /* Tombol kembali mengambang: hanya tampil saat mode PWA/standalone,
+           karena .app-header (tempat tombol "Ke Dashboard Utama" asli berada)
+           disembunyikan total di mode itu. Tanpa ini tombol kembali hilang. */
+        .pwa-float-nav {
+            display: none;
+        }
+        @media all and (display-mode: standalone), all and (display-mode: fullscreen) {
+            .pwa-float-nav {
+                display: flex;
+            }
+        }
+        html[data-pwa-standalone="true"] .pwa-float-nav {
+            display: flex !important;
+        }
+        .pwa-float-nav {
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            z-index: 9999;
+            gap: 6px;
+            align-items: center;
+        }
+        .pwa-float-nav a,
+        .pwa-float-nav button {
+            background: rgba(45,55,72,0.92);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 20px;
+            padding: 5px 12px;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            text-decoration: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        }
+        .pwa-float-nav a:hover,
+        .pwa-float-nav button:hover {
+            background: rgba(26,32,44,0.95);
+        }
+
         .app-header .logo {
             display: flex;
             align-items: center;
@@ -2607,7 +2648,6 @@
             background: #fff;
             box-shadow: var(--shadow);
             overflow: auto;
-            max-height: 500px;
         }
         #tab3 .cash-table-wrap table {
             width: 100%;
@@ -2720,6 +2760,10 @@
     </style>
 </head>
 <body>
+    <div class="pwa-float-nav">
+        <a href="index.html" title="Kembali ke Hub">⬅️ Dashboard</a>
+        <button id="btnLogoutFloat" type="button" title="Keluar dari akun">🚪</button>
+    </div>
     <header class="app-header">
         <div class="logo">
             <h1>📊 GAJAH MAS 2026</h1>
@@ -10383,13 +10427,16 @@
         // ================================================================
         // LOGOUT
         // ================================================================
-        document.getElementById('btnLogoutHeader').addEventListener('click', async function() {
+        async function handleLogoutClick() {
             if (!confirm('Yakin mau logout dari GAJAH MAS 2026?')) return;
             try {
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
             } catch (e) { /* tetap lanjut reload walau request gagal, biar UI konsisten */ }
             location.reload();
-        });
+        }
+        document.getElementById('btnLogoutHeader').addEventListener('click', handleLogoutClick);
+        const btnLogoutFloatEl = document.getElementById('btnLogoutFloat');
+        if (btnLogoutFloatEl) btnLogoutFloatEl.addEventListener('click', handleLogoutClick);
 
         async function handleAuthSubmit(e) {
             e.preventDefault();

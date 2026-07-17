@@ -100,6 +100,47 @@
             z-index: 39 !important;
         }
 
+        /* Tombol kembali mengambang: hanya tampil saat mode PWA/standalone,
+           karena .app-header (tempat tombol "Ke Dashboard Utama" asli berada)
+           disembunyikan total di mode itu. Tanpa ini tombol kembali hilang. */
+        .pwa-float-nav {
+            display: none;
+        }
+        @media all and (display-mode: standalone), all and (display-mode: fullscreen) {
+            .pwa-float-nav {
+                display: flex;
+            }
+        }
+        html[data-pwa-standalone="true"] .pwa-float-nav {
+            display: flex !important;
+        }
+        .pwa-float-nav {
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            z-index: 9999;
+            gap: 6px;
+            align-items: center;
+        }
+        .pwa-float-nav a,
+        .pwa-float-nav button {
+            background: rgba(45,55,72,0.92);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 20px;
+            padding: 5px 12px;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            text-decoration: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        }
+        .pwa-float-nav a:hover,
+        .pwa-float-nav button:hover {
+            background: rgba(26,32,44,0.95);
+        }
+
         .app-header .logo {
             display: flex;
             align-items: center;
@@ -2685,6 +2726,10 @@
     </style>
 </head>
 <body class="pin-locked">
+    <div class="pwa-float-nav">
+        <a href="index.html" title="Kembali ke Hub">⬅️ Dashboard</a>
+        <button id="btnLogoutFloat" type="button" title="Keluar dari akun">🚪</button>
+    </div>
     <header class="app-header">
         <div class="logo">
             <h1>📊 GAJAH MAS 2026</h1>
@@ -3613,6 +3658,17 @@
                 return isNaN(result) ? 0 : result;
             }
             return 0;
+        }
+
+        // Normalisasi No.Faktur untuk pencocokan antar tab (Bank Data Penjualan <-> Data Uang Masuk).
+        // Kenapa perlu: kadang satu sisi No.Faktur ke-import sebagai TEKS (mis. "011003260600854",
+        // nol di depan tetap ada) sementara sisi lain ke-import sebagai ANGKA (Excel membuang nol
+        // di depan jadi "11003260600854", atau kolom format custom dgn padding nol yg cuma tampil
+        // di layar tapi nilai aslinya angka polos). Kalau dicocokkan dgn "===" string biasa, dua
+        // No.Faktur yg sebenarnya sama jadi dianggap beda -> baris produk & profit tidak ketemu.
+        // Fungsi ini: buang spasi/strip/titik, huruf kecil semua, lalu buang nol di depan.
+        function normFaktur(v) {
+            return String(v || '').trim().toLowerCase().replace(/[\s\-.]/g, '').replace(/^0+(?=\d)/, '');
         }
 
         const NAMA_BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus',
@@ -6170,8 +6226,7 @@
             // Cek ulang ke Bank Data Penjualan (Tab 1): satu No.Faktur bisa punya lebih dari
             // 1 baris/item produk. Kalau hanya dihitung dari 1 baris, Total Tagihan jadi lebih
             // kecil dari yang sebenarnya sehingga Sisa Tagihan bisa minus padahal belum tentu lunas.
-            const itemsFaktur = salesData.filter(s => String(s['No.Faktur'] || '').trim() === String(r
-                .noFaktur || '').trim());
+            const itemsFaktur = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(r.noFaktur));
             const isMultiItem = itemsFaktur.length > 1;
             const totalTagihanGabungan = isMultiItem ? itemsFaktur.reduce((sum, it) => sum + parseNumber(it
                 .Total), 0) : r.total;
@@ -6232,8 +6287,7 @@
             const trashBtn = document.getElementById('ptTrashBtn');
             if (trashBtn) {
                 trashBtn.addEventListener('click', async () => {
-                    const idx = salesData.findIndex(row => String(row['No.Faktur'] || '').trim() === String(r
-                        .noFaktur || '').trim());
+                    const idx = salesData.findIndex(row => normFaktur(row['No.Faktur']) === normFaktur(r.noFaktur));
                     if (idx === -1) {
                         showToast('⚠️ Data asli tidak ditemukan di Bank Data Penjualan (mungkin sudah dipindahkan/dihapus).',
                             'warning');
@@ -6290,7 +6344,7 @@
             cashCurrentDetailFaktur = noFaktur;
 
             // Semua baris produk untuk No.Faktur ini dari Tab 1 (Bank Data Penjualan)
-            const items = salesData.filter(s => (s['No.Faktur'] || '').toString().trim() === noFaktur);
+            const items = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(noFaktur));
             const sumber = items.length ? items : [d];
 
             let totalQty = 0,
@@ -6428,8 +6482,7 @@
         // ================================================================
         async function ubahCashJadiPiutang(noFaktur) {
             if (!noFaktur) return;
-            const target = String(noFaktur).trim();
-            const rows = salesData.filter(r => (r['No.Faktur'] || '').toString().trim() === target);
+            const rows = salesData.filter(r => normFaktur(r['No.Faktur']) === normFaktur(noFaktur));
             if (rows.length === 0) {
                 showToast('❌ Baris faktur tidak ditemukan di Bank Data Penjualan.', 'warning');
                 return;
@@ -8637,7 +8690,7 @@
             let sales = '',
                 tglFaktur = '';
             salesData.forEach(item => {
-                if (String(item['No.Faktur'] || '').trim() !== target) return;
+                if (normFaktur(item['No.Faktur']) !== normFaktur(target)) return;
                 const jml = parseNumber(item.Jumlah);
                 qty += jml;
                 if (item.Profit !== undefined && item.Profit !== '' && item.Profit !== null) {
@@ -8787,7 +8840,7 @@
             if (!noFaktur) return;
 
             const gidxList = [];
-            salesData.forEach((s, i) => { if (String(s['No.Faktur'] || '').trim() === noFaktur) gidxList.push(i); });
+            salesData.forEach((s, i) => { if (normFaktur(s['No.Faktur']) === normFaktur(noFaktur)) gidxList.push(i); });
             if (!gidxList.length) return;
             const rows = gidxList.map(i => salesData[i]);
 
@@ -9171,7 +9224,7 @@
 
         async function tab1BatalkanTransaksiFaktur(noFaktur) {
             const gidxList = [];
-            salesData.forEach((s, i) => { if (String(s['No.Faktur'] || '').trim() === noFaktur) gidxList.push(i); });
+            salesData.forEach((s, i) => { if (normFaktur(s['No.Faktur']) === normFaktur(noFaktur)) gidxList.push(i); });
             if (!gidxList.length) { showToast('Faktur tidak ditemukan.', 'warning'); return; }
             if (!confirm(`Batalkan transaksi faktur ${noFaktur}?\nSemua baris (${gidxList.length} item) akan dipindahkan ke Data Sampah dan bisa dipulihkan lagi dari tab Save Data All.`)) return;
 
@@ -9203,7 +9256,7 @@
             const noFaktur = String(item.noFaktur || '').trim();
             if (!noFaktur) return;
 
-            const rows = salesData.filter(s => String(s['No.Faktur'] || '').trim() === noFaktur);
+            const rows = salesData.filter(s => normFaktur(s['No.Faktur']) === normFaktur(noFaktur));
 
             let totalQty = 0,
                 totalJual = 0,
@@ -9749,13 +9802,16 @@
         // ================================================================
         // LOGOUT
         // ================================================================
-        document.getElementById('btnLogoutHeader').addEventListener('click', async function() {
+        async function handleLogoutClick() {
             if (!confirm('Yakin mau logout dari GAJAH MAS 2026?')) return;
             try {
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
             } catch (e) { /* tetap lanjut reload walau request gagal, biar UI konsisten */ }
             location.reload();
-        });
+        }
+        document.getElementById('btnLogoutHeader').addEventListener('click', handleLogoutClick);
+        const btnLogoutFloatEl = document.getElementById('btnLogoutFloat');
+        if (btnLogoutFloatEl) btnLogoutFloatEl.addEventListener('click', handleLogoutClick);
 
         async function handleAuthSubmit(e) {
             e.preventDefault();
